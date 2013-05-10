@@ -289,9 +289,10 @@ static int pth_new_handler(ZEND_OPCODE_HANDLER_ARGS) /* {{{ */
 		} else {
 			zval_ptr_dtor(&retval);
 		}
-		ZEND_VM_JMP(EX(op_array)->opcodes + opline->op2.opline_num);
 
 		zval_ptr_dtor(&arg);
+
+		ZEND_VM_JMP(EX(op_array)->opcodes + opline->op2.opline_num);
 
 		return ZEND_USER_OPCODE_CONTINUE;
 	}
