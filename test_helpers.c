@@ -158,6 +158,31 @@ ZEND_DECLARE_MODULE_GLOBALS(test_helpers)
 # define PTH_TYPE(t) t.op_type
 #endif
 
+#define AI_SET_PTR(t, val) do {				\
+		temp_variable *__t = (t);			\
+		__t->var.ptr = (val);				\
+		__t->var.ptr_ptr = &__t->var.ptr;	\
+	} while (0)
+
+#define RETURN_VALUE_USED(opline) (!((opline)->result_type & EXT_TYPE_UNUSED))
+
+#define ZEND_VM_CONTINUE()         return 0
+#define LOAD_OPLINE()
+
+#define OPLINE EX(opline)
+
+#define ZEND_VM_SET_OPCODE(new_op) \
+	OPLINE = new_op
+
+#define ZEND_VM_JMP(new_op) \
+	if (EXPECTED(!EG(exception))) { \
+		ZEND_VM_SET_OPCODE(new_op); \
+	} else { \
+		LOAD_OPLINE(); \
+	} \
+	ZEND_VM_CONTINUE()
+
+
 zval *pth_get_zval_ptr(int node_type, PTH_ZNODE *node, zval **freeval, zend_execute_data *execute_data TSRMLS_DC)
 {
 	*freeval = NULL;
@@ -248,6 +273,21 @@ static int pth_new_handler(ZEND_OPCODE_HANDLER_ARGS) /* {{{ */
 	zend_fcall_info_argn(&THG(new_handler).fci TSRMLS_CC, 1, &arg);
 	zend_fcall_info_call(&THG(new_handler).fci, &THG(new_handler).fcc, &retval, NULL TSRMLS_CC);
 	zend_fcall_info_args_clear(&THG(new_handler).fci, 1);
+
+	if (Z_TYPE_P(retval) == IS_OBJECT) {
+		if (RETURN_VALUE_USED(opline)) {
+			AI_SET_PTR(&EX_T(opline->result.var), retval);
+		} else {
+			zval_ptr_dtor(&retval);
+		}
+
+		zval_ptr_dtor(&arg);
+
+		ZEND_VM_JMP(EX(op_array)->opcodes + opline->op2.opline_num);
+
+		return ZEND_USER_OPCODE_CONTINUE;
+	}
+
 
 	convert_to_string_ex(&retval);
 	if (zend_lookup_class(Z_STRVAL_P(retval), Z_STRLEN_P(retval), &new_ce TSRMLS_CC) == FAILURE) {
