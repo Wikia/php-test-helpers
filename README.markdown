@@ -1,3 +1,7 @@
+### **Attention:** [the test_helpers extension is superseded](https://github.com/php-test-helpers/php-test-helpers/issues/29#issuecomment-44049111) by [uopz](https://github.com/krakjoe/uopz)
+
+---
+
 # ext/test_helpers #
 
 `ext/test_helpers` is an extension for the PHP Interpreter to ease testing of PHP code.
