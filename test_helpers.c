@@ -3,7 +3,7 @@
   | ext/test_helper                                                      |
   | An extension for the PHP Interpreter to ease testing of PHP code.    |
   +----------------------------------------------------------------------+
-  | Copyright (c) 2009-2012 Sebastian Bergmann. All rights reserved.     |
+  | Copyright (c) 2009-2013 Sebastian Bergmann. All rights reserved.     |
   +----------------------------------------------------------------------+
   | Redistribution and use in source and binary forms, with or without   |
   | modification, are permitted provided that the following conditions   |
@@ -62,6 +62,14 @@
 /* {{{ PHP < 5.3.0 */
 #if PHP_VERSION_ID < 50300
 typedef opcode_handler_t user_opcode_handler_t;
+
+#if (defined (__GNUC__) && __GNUC__ > 2 ) && !defined(DARWIN) && !defined(__hpux) && !defined(_AIX)
+#   define EXPECTED(condition)   __builtin_expect(condition, 1)
+#   define UNEXPECTED(condition) __builtin_expect(condition, 0)
+#else
+#   define EXPECTED(condition)   (condition)
+#   define UNEXPECTED(condition) (condition)
+#endif
 
 #define Z_ADDREF_P(z) ((z)->refcount++)
 
@@ -143,80 +151,71 @@ ZEND_DECLARE_MODULE_GLOBALS(test_helpers)
 
 #undef EX
 #define EX(element) execute_data->element
-#define EX_T(offset) (*(temp_variable *)((char *) EX(Ts) + offset))
 
-#define AI_SET_PTR(t, val) do {				\
-		temp_variable *__t = (t);			\
-		__t->var.ptr = (val);				\
-		__t->var.ptr_ptr = &__t->var.ptr;	\
-	} while (0)
+#if PHP_VERSION_ID >= 50500
+# define EX_T(offset) (*EX_TMP_VAR(execute_data, offset))
+#else
+# define EX_T(offset) (*(temp_variable *)((char*)execute_data->Ts + offset))
+#endif
 
-#define RETURN_VALUE_USED(opline) (!((opline)->result_type & EXT_TYPE_UNUSED))
+#if PHP_VERSION_ID >= 50399
+# define PTH_ZNODE znode_op
+# define PTH_TYPE(t) t##_type
+#else
+# define PTH_ZNODE znode
+# define PTH_TYPE(t) t.op_type
+#endif
 
-#define ZEND_VM_CONTINUE()         return 0
-#define LOAD_OPLINE()
-
-#define OPLINE EX(opline)
-
-#define ZEND_VM_SET_OPCODE(new_op) \
-	OPLINE = new_op
-
-#define ZEND_VM_JMP(new_op) \
-	if (EXPECTED(!EG(exception))) { \
-		ZEND_VM_SET_OPCODE(new_op); \
-	} else { \
-		LOAD_OPLINE(); \
-	} \
-	ZEND_VM_CONTINUE()
-
-
-static zval *pth_get_zval_ptr(znode *node, zval **freeval, zend_execute_data *execute_data TSRMLS_DC) /* {{{ */
+zval *pth_get_zval_ptr(int node_type, PTH_ZNODE *node, zval **freeval, zend_execute_data *execute_data TSRMLS_DC)
 {
 	*freeval = NULL;
 
-	switch (node->op_type) {
-	case IS_CONST:
-		return &(node->u.constant);
-	case IS_VAR:
-#if ZEND_EXTENSION_API_NO >= 220100525
-		return EX_T(node->u.op.var).var.ptr;
+	switch (node_type) {
+		case IS_CONST:
+#if PHP_VERSION_ID >= 50399
+			return node->zv;
 #else
-		return EX_T(node->u.var).var.ptr;
+			return &node->u.constant;
 #endif
-	case IS_TMP_VAR:
-#if ZEND_EXTENSION_API_NO >= 220100525
-		return (*freeval = &EX_T(node->u.op.var).tmp_var);
-#else
-		return (*freeval = &EX_T(node->u.var).tmp_var);
-#endif
-	case IS_CV:
-		{
-#if ZEND_EXTENSION_API_NO >= 220100525
-		zval ***ret = &execute_data->CVs[node->u.op.var];
-#else
-		zval ***ret = &execute_data->CVs[node->u.var];
-#endif
-		if (!*ret) {
-#if ZEND_EXTENSION_API_NO >= 220100525
-				zend_compiled_variable *cv = &EG(active_op_array)->vars[node->u.op.var];
-#else
-				zend_compiled_variable *cv = &EG(active_op_array)->vars[node->u.var];
-#endif
-				if (zend_hash_quick_find(EG(active_symbol_table), cv->name, cv->name_len+1, cv->hash_value, (void**)ret)==FAILURE) {
-					zend_error(E_NOTICE, "Undefined variable: %s", cv->name);
-					return &EG(uninitialized_zval);
-				}
-		}
-		return **ret;
-		}
-	case IS_UNUSED:
-	default:
-		return NULL;
-	}
-}
-/* }}} */
+			break;
 
-static void test_helpers_free_handler(zend_fcall_info *fci) /* {{{ */
+		case IS_VAR:
+#if PHP_VERSION_ID >= 50399
+			if (EX_T(node->var).var.ptr) {
+				return EX_T(node->var).var.ptr;
+#else
+			if (EX_T(node->u.var).var.ptr) {
+				return EX_T(node->u.var).var.ptr;
+#endif
+			}
+			break;
+
+		case IS_TMP_VAR:
+#if PHP_VERSION_ID >= 50399
+			return (*freeval = &EX_T(node->var).tmp_var);
+#else
+			return (*freeval = &EX_T(node->u.var).tmp_var);
+#endif
+			break;
+
+		case IS_CV: {
+			zval **tmp;
+#if PHP_VERSION_ID >= 50399
+			tmp = zend_get_compiled_variable_value(execute_data, node->constant);
+#else
+			tmp = zend_get_compiled_variable_value(execute_data, node->u.constant.value.lval);
+#endif
+			if (tmp) {
+				return *tmp;
+			}
+			break;
+		}
+	}
+
+	return NULL;
+}
+
+static void test_helpers_free_handler(zend_fcall_info *fci TSRMLS_DC) /* {{{ */
 {
 	if (fci->function_name) {
 		zval_ptr_dtor(&fci->function_name);
@@ -305,7 +304,8 @@ static int pth_new_handler(ZEND_OPCODE_HANDLER_ARGS) /* {{{ */
 static int pth_exit_handler(ZEND_OPCODE_HANDLER_ARGS) /* {{{ */
 {
 	zval *msg, *freeop;
-	zval *retval;
+	zend_op *opline = EX(opline);
+	zval *retval = NULL;
 
 	if (THG(exit_handler).fci.function_name == NULL) {
 		if (old_exit_handler) {
@@ -315,13 +315,18 @@ static int pth_exit_handler(ZEND_OPCODE_HANDLER_ARGS) /* {{{ */
 		}
 	}
 
-	msg = pth_get_zval_ptr(&EX(opline)->op1, &freeop, execute_data TSRMLS_CC);
+	msg = pth_get_zval_ptr(opline->PTH_TYPE(op1), &opline->op1, &freeop, execute_data TSRMLS_CC);
 
 	if (msg) {
 		zend_fcall_info_argn(&THG(exit_handler).fci TSRMLS_CC, 1, &msg);
 	}
 	zend_fcall_info_call(&THG(exit_handler).fci, &THG(exit_handler).fcc, &retval, NULL TSRMLS_CC);
 	zend_fcall_info_args_clear(&THG(exit_handler).fci, 1);
+
+	if(UNEXPECTED(retval == NULL)) {
+		EX(opline)++;
+		return ZEND_USER_OPCODE_CONTINUE;
+	}
 
 	convert_to_boolean(retval);
 	if (Z_LVAL_P(retval)) {
@@ -442,7 +447,7 @@ static PHP_FUNCTION(set_new_overload)
 /* {{{ proto bool set_exit_overload(callback cb)
    Register a callback, called on exit()/die() */
 static PHP_FUNCTION(set_exit_overload)
-{	
+{
 	overload_helper(pth_exit_handler, ZEND_EXIT, &THG(exit_handler), INTERNAL_FUNCTION_PARAM_PASSTHRU);
 }
 /* }}} */
@@ -660,7 +665,7 @@ zend_extension zend_extension_entry = {
 	TEST_HELPERS_VERSION,
 	"Johannes Schlueter, Scott MacVicar, Sebastian Bergmann",
 	"http://github.com/johannes/php-test-helpers",
-	"Copyright (c) 2009-2012",
+	"Copyright (c) 2009-2013",
 	test_helpers_zend_startup,
 	NULL,           /* shutdown_func_t */
 	NULL,           /* activate_func_t */
