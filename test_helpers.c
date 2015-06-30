@@ -505,14 +505,14 @@ static PHP_FUNCTION(unset_exit_overload)
 }
 /* }}} */
 
-static int pth_rename_function_impl(HashTable *table, char *orig, int orig_len, char *new, int new_len TSRMLS_DC) /* {{{ */
+static int pth_rename_function_impl(HashTable *table, char *orig, int orig_len, char *new_char, int new_len TSRMLS_DC) /* {{{ */
 {
 	zend_function *func, *dummy_func;
 
 	if (zend_hash_find(table, orig, orig_len + 1, (void **) &func) == FAILURE) {
 		php_error_docref(NULL TSRMLS_CC, E_WARNING, "%s(%s, %s) failed: %s does not exist!"			,
 						get_active_function_name(TSRMLS_C),
-						orig,  new, orig);
+						orig,  new_char, orig);
 		return FAILURE;
 	}
 
@@ -522,15 +522,15 @@ static int pth_rename_function_impl(HashTable *table, char *orig, int orig_len, 
 		return FAILURE;
 	}
 
-	if (zend_hash_find(table, new, new_len + 1, (void **) &dummy_func) == SUCCESS) {
+	if (zend_hash_find(table, new_char, new_len + 1, (void **) &dummy_func) == SUCCESS) {
 		php_error_docref(NULL TSRMLS_CC, E_WARNING, "%s(%s, %s) failed: %s already exists!"			,
 							get_active_function_name(TSRMLS_C),
-							orig,  new, new);
+							orig,  new_char, new_char);
 		return FAILURE;
 	}
 
-	if (zend_hash_add(table, new, new_len + 1, func, sizeof(zend_function), NULL) == FAILURE) {
-		php_error_docref(NULL TSRMLS_CC, E_WARNING, "%s() failed to insert %s into EG(function_table)", get_active_function_name(TSRMLS_C), new);
+	if (zend_hash_add(table, new_char, new_len + 1, func, sizeof(zend_function), NULL) == FAILURE) {
+		php_error_docref(NULL TSRMLS_CC, E_WARNING, "%s() failed to insert %s into EG(function_table)", get_active_function_name(TSRMLS_C), new_char);
 		return FAILURE;
 	}
 
@@ -541,7 +541,7 @@ static int pth_rename_function_impl(HashTable *table, char *orig, int orig_len, 
 	if (zend_hash_del(table, orig, orig_len + 1) == FAILURE) {
 		php_error_docref(NULL TSRMLS_CC, E_WARNING, "%s() failed to remove %s from function table", get_active_function_name(TSRMLS_C), orig);
 
-		zend_hash_del(table, new, new_len + 1);
+		zend_hash_del(table, new_char, new_len + 1);
 		return FAILURE;
 	}
 
@@ -549,13 +549,13 @@ static int pth_rename_function_impl(HashTable *table, char *orig, int orig_len, 
 }
 /* }}} */
 
-static int pth_rename_function(HashTable *table, char *orig, int orig_len, char *new, int new_len TSRMLS_DC) /* {{{ */
+static int pth_rename_function(HashTable *table, char *orig, int orig_len, char *new_char, int new_len TSRMLS_DC) /* {{{ */
 {
 	char *lower_orig, *lower_new;
 	int success;
 
 	lower_orig = zend_str_tolower_dup(orig, orig_len);
-	lower_new = zend_str_tolower_dup(new, new_len);
+	lower_new = zend_str_tolower_dup(new_char, new_len);
 
 	success = pth_rename_function_impl(table, lower_orig, orig_len, lower_new, new_len TSRMLS_CC);
 
