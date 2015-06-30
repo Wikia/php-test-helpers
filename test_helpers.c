@@ -505,107 +505,6 @@ static PHP_FUNCTION(unset_exit_overload)
 }
 /* }}} */
 
-static int pth_rename_function_impl(HashTable *table, char *orig, int orig_len, char *new_char, int new_len TSRMLS_DC) /* {{{ */
-{
-	zend_function *func, *dummy_func;
-
-	if (zend_hash_find(table, orig, orig_len + 1, (void **) &func) == FAILURE) {
-		php_error_docref(NULL TSRMLS_CC, E_WARNING, "%s(%s, %s) failed: %s does not exist!"			,
-						get_active_function_name(TSRMLS_C),
-						orig,  new_char, orig);
-		return FAILURE;
-	}
-
-	/* TODO: Add infrastructure for resetting internal funcs */
-	if (func->type != ZEND_USER_FUNCTION) {
-		php_error_docref(NULL TSRMLS_CC, E_WARNING, "\"%s\" is an internal function", orig);
-		return FAILURE;
-	}
-
-	if (zend_hash_find(table, new_char, new_len + 1, (void **) &dummy_func) == SUCCESS) {
-		php_error_docref(NULL TSRMLS_CC, E_WARNING, "%s(%s, %s) failed: %s already exists!"			,
-							get_active_function_name(TSRMLS_C),
-							orig,  new_char, new_char);
-		return FAILURE;
-	}
-
-	if (zend_hash_add(table, new_char, new_len + 1, func, sizeof(zend_function), NULL) == FAILURE) {
-		php_error_docref(NULL TSRMLS_CC, E_WARNING, "%s() failed to insert %s into EG(function_table)", get_active_function_name(TSRMLS_C), new_char);
-		return FAILURE;
-	}
-
-	if (func->type == ZEND_USER_FUNCTION) {
-		function_add_ref(func);
-	}
-
-	if (zend_hash_del(table, orig, orig_len + 1) == FAILURE) {
-		php_error_docref(NULL TSRMLS_CC, E_WARNING, "%s() failed to remove %s from function table", get_active_function_name(TSRMLS_C), orig);
-
-		zend_hash_del(table, new_char, new_len + 1);
-		return FAILURE;
-	}
-
-	return SUCCESS;
-}
-/* }}} */
-
-static int pth_rename_function(HashTable *table, char *orig, int orig_len, char *new_char, int new_len TSRMLS_DC) /* {{{ */
-{
-	char *lower_orig, *lower_new;
-	int success;
-
-	lower_orig = zend_str_tolower_dup(orig, orig_len);
-	lower_new = zend_str_tolower_dup(new_char, new_len);
-
-	success = pth_rename_function_impl(table, lower_orig, orig_len, lower_new, new_len TSRMLS_CC);
-
-	efree(lower_orig);
-	efree(lower_new);
-
-	return success;
-}
-/* }}} */
-
-/* {{{ proto bool rename_method(string class name, string orig_method_name, string new_method_name)
-   Rename a method inside a class. The method whil remain partof the same class */
-static PHP_FUNCTION(rename_method)
-{
-	zend_class_entry *ce = NULL;
-	char *orig_fname, *new_fname;
-	int orig_fname_len, new_fname_len;
-
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "Css", &ce, &orig_fname, &orig_fname_len, &new_fname, &new_fname_len) == FAILURE) {
-		return;
-	}
-
-	if (SUCCESS == pth_rename_function(&ce->function_table, orig_fname, orig_fname_len, new_fname, new_fname_len TSRMLS_CC)) {
-		RETURN_TRUE;
-	} else {
-		RETURN_FALSE;
-	}
-}
-/* }}} */
-
-/* {{{ proto bool rename_function(string orig_func_name, string new_func_name)
-   Rename a function from its original to a new name. This is mainly useful in
-   unittest to stub out untested functions */
-static PHP_FUNCTION(rename_function)
-{
-	char *orig_fname, *new_fname;
-	int orig_fname_len, new_fname_len;
-
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "ss", &orig_fname, &orig_fname_len, &new_fname, &new_fname_len) == FAILURE) {
-		return;
-	}
-
-	if (SUCCESS == pth_rename_function(EG(function_table), orig_fname, orig_fname_len, new_fname, new_fname_len TSRMLS_CC)) {
-		RETURN_TRUE;
-	} else {
-		RETURN_FALSE;
-	}
-}
-/* }}} */
-
 /* {{{ arginfo */
 /* {{{ unset_new_overload */
 ZEND_BEGIN_ARG_INFO(arginfo_unset_new_overload, 0)
@@ -620,21 +519,6 @@ ZEND_END_ARG_INFO()
 /* {{{ set_new_overload */
 ZEND_BEGIN_ARG_INFO(arginfo_set_new_overload, 0)
 	ZEND_ARG_INFO(0, callback)
-ZEND_END_ARG_INFO()
-/* }}} */
-
-/* {{{ rename_method */
-ZEND_BEGIN_ARG_INFO(arginfo_rename_method, 0)
-	ZEND_ARG_INFO(0, class_name)
-	ZEND_ARG_INFO(0, orig_method_name)
-	ZEND_ARG_INFO(0, new_method_name)
-ZEND_END_ARG_INFO()
-/* }}} */
-
-/* {{{ rename_function */
-ZEND_BEGIN_ARG_INFO(arginfo_rename_function, 0)
-	ZEND_ARG_INFO(0, orig_func_name)
-	ZEND_ARG_INFO(0, new_func_name)
 ZEND_END_ARG_INFO()
 /* }}} */
 
@@ -653,8 +537,6 @@ static const zend_function_entry test_helpers_functions[] = {
 	PHP_FE(set_new_overload, arginfo_set_new_overload)
 	PHP_FE(unset_exit_overload, arginfo_unset_exit_overload)
 	PHP_FE(set_exit_overload, arginfo_set_exit_overload)
-	PHP_FE(rename_method, arginfo_rename_method)
-	PHP_FE(rename_function, arginfo_rename_function)
 	{NULL, NULL, NULL}
 };
 /* }}} */
