@@ -404,6 +404,25 @@ static PHP_MINIT_FUNCTION(test_helpers)
 }
 /* }}} */
 
+/* {{{ PHP_MSHUTDOWN_FUNCTION
+ */
+static PHP_MSHUTDOWN_FUNCTION(test_helpers)
+{
+	if (test_helpers_module_initialized) {
+		zend_set_user_opcode_handler(ZEND_NEW, old_new_handler);
+		old_new_handler = 0;
+
+		zend_set_user_opcode_handler(ZEND_EXIT, old_exit_handler);
+		old_exit_handler = 0;
+
+		test_helpers_module_initialized = 0;
+	}
+
+	return SUCCESS;
+}
+
+/* }}} */
+
 /* {{{ PHP_RSHUTDOWN_FUNCTION
  */
 static PHP_RSHUTDOWN_FUNCTION(test_helpers)
@@ -666,7 +685,7 @@ zend_module_entry test_helpers_module_entry = {
 	"test_helpers",
 	test_helpers_functions,
 	PHP_MINIT(test_helpers),
-	NULL,
+	PHP_MSHUTDOWN(test_helpers),
 	NULL,
 	PHP_RSHUTDOWN(test_helpers),
 	PHP_MINFO(test_helpers),
